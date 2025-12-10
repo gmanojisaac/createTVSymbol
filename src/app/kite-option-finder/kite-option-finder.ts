@@ -228,6 +228,9 @@ interface IndexLtp {
   `,
 })
 export class KiteOptionFinderComponent implements OnInit {
+  private debug(...args: any[]) {
+  console.log('[DEBUG]', ...args);
+}
   niftySpot = 0;
   bankNiftySpot = 0;
   sensexSpot = 0;
@@ -242,6 +245,7 @@ export class KiteOptionFinderComponent implements OnInit {
 
 ngOnInit(): void {
   // 1) Load instruments from CSV once
+  console.log('[DEBUG] KiteOptionFinder ngOnInit');
   this.loadInstruments();
 
   timer(0, 3000)
@@ -302,20 +306,31 @@ ngOnInit(): void {
 
   private calculateAll(): ResultSet {
     const now = new Date();
+    this.debug('NIFTY spot:', this.niftySpot);
+this.debug('BANKNIFTY spot:', this.bankNiftySpot);
+this.debug('SENSEX spot:', this.sensexSpot);
+
+
+
+
 
     // --- NIFTY weekly ---
-    const niftyInstruments = this.instruments.filter(
-      r =>
-        r['name'] === 'NIFTY' &&
-        r['exchange'] === 'NFO' &&
-        r['segment'] === 'NFO-OPT'
-    );
+const niftyInstruments = this.instruments.filter(r =>
+  r['exchange'] === 'NFO' &&
+  r['segment'] === 'NFO-OPT' &&
+  r['tradingsymbol']?.startsWith('NIFTY')
+);
+
+this.debug('NIFTY instruments count:', niftyInstruments.length);
+this.debug('Sample NIFTY instruments:', niftyInstruments.slice(0, 5));
+
     const niftyWeekExpiry = this.getCurrentWeekExpiry(niftyInstruments, now);
+    console.log('NIFTY upcoming week expiry:', niftyWeekExpiry);
     if (!niftyWeekExpiry) {
       throw new Error('Could not find current week expiry for NIFTY.');
     }
 
-    const niftyCEStrike = this.roundUpToNext100(this.niftySpot);
+    const niftyCEStrike = this.roundUpToNext50(this.niftySpot);
     const niftyPEStrike = niftyCEStrike + 50;
 
     const niftyCE = this.pickOption(
@@ -349,13 +364,23 @@ ngOnInit(): void {
       tvSymbol: this.buildTvSymbol('NSE', 'NIFTY', niftyWeekExpiry, 'P', niftyPEStrike),
     };
 
+
+this.debug('Finding NIFTY weekly expiry...');
+this.debug('Finding BANKNIFTY monthly expiry...');
+this.debug('Finding SENSEX weekly expiry...');
+this.debug('Selected NIFTY CE strike:', niftyCEStrike);
+this.debug('Selected NIFTY PE strike:', niftyPEStrike);
     // --- BANKNIFTY monthly ---
-    const bankInstruments = this.instruments.filter(
-      r =>
-        r['name'] === 'BANKNIFTY' &&
-        r['exchange'] === 'NFO' &&
-        r['segment'] === 'NFO-OPT'
-    );
+
+const bankInstruments = this.instruments.filter(r =>
+  r['exchange'] === 'NFO' &&
+  r['segment'] === 'NFO-OPT' &&
+  r['tradingsymbol']?.startsWith('BANKNIFTY')
+);
+
+this.debug('BANKNIFTY instruments count:', bankInstruments.length);
+this.debug('Sample BANKNIFTY instruments:', bankInstruments.slice(0, 5));
+
     const bankMonthExpiry = this.getCurrentMonthExpiry(bankInstruments, now);
     if (!bankMonthExpiry) {
       throw new Error('Could not find current month expiry for BANKNIFTY.');
@@ -406,14 +431,20 @@ ngOnInit(): void {
         bankPEStrike
       ),
     };
+    this.debug('Selected BANKNIFTY CE strike:', bankCEStrike);
+this.debug('Selected BANKNIFTY PE strike:', bankPEStrike);
+
 
     // --- SENSEX weekly (BFO, Rule A) ---
-    const sensexInstruments = this.instruments.filter(
-      r =>
-        r['name'] === 'SENSEX' &&
-        r['exchange'] === 'BFO' &&
-        r['segment'] === 'BFO-OPT'
-    );
+const sensexInstruments = this.instruments.filter(r =>
+  r['exchange'] === 'BFO' &&
+  r['segment'] === 'BFO-OPT' &&
+  r['tradingsymbol']?.startsWith('SENSEX')
+);
+
+this.debug('SENSEX instruments count:', sensexInstruments.length);
+this.debug('Sample SENSEX instruments:', sensexInstruments.slice(0, 5));
+
     const sensexWeekExpiry = this.getCurrentWeekExpiry(sensexInstruments, now);
     if (!sensexWeekExpiry) {
       throw new Error('Could not find current week expiry for SENSEX.');
@@ -465,7 +496,8 @@ ngOnInit(): void {
         sensexPEStrike
       ),
     };
-
+this.debug('Selected SENSEX CE strike:', sensexCEStrike);
+this.debug('Selected SENSEX PE strike:', sensexPEStrike);
     return {
       niftyCE: niftyCEResult,
       niftyPE: niftyPEResult,
@@ -481,7 +513,9 @@ ngOnInit(): void {
   private roundUpToNext100(value: number): number {
     return value - (value % 100);
   }
-
+  private roundUpToNext50(value: number): number {
+    return value - (value % 50);
+  }
   private parseExpiry(row: InstrumentRow): Date | null {
     const raw = row['expiry'];
     if (!raw) return null;
@@ -489,81 +523,157 @@ ngOnInit(): void {
     return isNaN(d.getTime()) ? null : d;
   }
 
-  private sameDate(a: Date, b: Date): boolean {
-    return (
-      a.getFullYear() === b.getFullYear() &&
-      a.getMonth() === b.getMonth() &&
-      a.getDate() === b.getDate()
+private sameDate(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+
+  private normalizeDate(d: Date): Date {
+  // strip time part, keep only Y-M-D
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+private getCurrentWeekExpiry(rows: InstrumentRow[], now: Date): Date | null {
+  this.debug('Finding weekly expiry… total rows:', rows.length);
+
+  const today = this.normalizeDate(now);
+  const oneDayMs = 1000 * 60 * 60 * 24;
+  const futureDates: Date[] = [];
+
+  for (const r of rows) {
+    const d = this.parseExpiry(r);
+    if (!d) continue;
+
+    const dDay = this.normalizeDate(d);
+
+    if (dDay < today) {
+      this.debug('Skipping past expiry:', dDay);
+      continue;
+    }
+
+    if (!futureDates.some(u => this.sameDate(u, dDay))) {
+      futureDates.push(dDay);
+      this.debug('Found expiry date:', dDay);
+    }
+  }
+
+  futureDates.sort((a, b) => a.getTime() - b.getTime());
+  this.debug('All future expiry dates sorted:', futureDates);
+
+  if (!futureDates.length) {
+    this.debug('No future expiry dates found.');
+    return null;
+  }
+
+  // Try this week
+  const within7 = futureDates.find(d => {
+    const diff = (d.getTime() - today.getTime()) / oneDayMs;
+    return diff >= 0 && diff <= 7;
+  });
+
+  this.debug('Within 7 days expiry:', within7);
+
+  if (within7) return within7;
+
+  // Try next week
+  const within14 = futureDates.find(d => {
+    const diff = (d.getTime() - today.getTime()) / oneDayMs;
+    return diff > 7 && diff <= 14;
+  });
+
+  this.debug('Within 14 days expiry:', within14);
+
+  if (within14) return within14;
+
+  // Fall back
+  this.debug('No weekly expiry found → using earliest:', futureDates[0]);
+  return futureDates[0];
+}
+
+
+
+
+private getCurrentMonthExpiry(rows: InstrumentRow[], now: Date): Date | null {
+  const today = this.normalizeDate(now);
+  const futureDates: Date[] = [];
+
+  for (const r of rows) {
+    const d = this.parseExpiry(r);
+    if (!d) continue;
+
+    const dDay = this.normalizeDate(d);
+
+    if (dDay < today) continue;
+
+    if (
+      dDay.getFullYear() === today.getFullYear() &&
+      dDay.getMonth() === today.getMonth()
+    ) {
+      if (!futureDates.some(u => this.sameDate(u, dDay))) {
+        futureDates.push(dDay);
+      }
+    }
+  }
+
+  futureDates.sort((a, b) => a.getTime() - b.getTime());
+  return futureDates[0] ?? null;
+}
+
+
+private pickOption(
+  rows: InstrumentRow[],
+  instrumentType: 'CE' | 'PE',
+  lotSize: number,
+  strike: number,
+  expiry: Date
+): InstrumentRow {
+  
+  this.debug(`Searching for ${instrumentType} strike=${strike} lot=${lotSize} expiry=${expiry}`);
+
+  let match = null;
+
+  for (const r of rows) {
+    const rType = r['instrument_type'];
+    const rLot = Number(r['lot_size']);
+    const rStrike = Number(r['strike']);
+    const rExpiry = this.parseExpiry(r);
+
+    if (!rExpiry) continue;
+
+    if (rType === instrumentType &&
+        rLot === lotSize &&
+        rStrike === strike &&
+        this.sameDate(rExpiry, expiry)) {
+
+      match = r;
+      break;
+    }
+  }
+
+  if (!match) {
+    this.debug(`NO MATCH FOUND for`, {
+      instrumentType,
+      lotSize,
+      strike,
+      expiry
+    });
+
+    const sample = rows.slice(0, 10);
+    this.debug('Sample rows for debugging:', sample);
+
+    throw new Error(
+      `Could not find ${instrumentType} for strike=${strike}, expiry=${expiry.toDateString()}`
     );
   }
 
-  private getCurrentWeekExpiry(rows: InstrumentRow[], now: Date): Date | null {
-    const uniqueDates: Date[] = [];
-    for (const r of rows) {
-      const d = this.parseExpiry(r);
-      if (!d) continue;
-      if (d < now) continue;
-      const diffDays = (d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-      if (diffDays <= 7) {
-        if (!uniqueDates.some(u => this.sameDate(u, d))) {
-          uniqueDates.push(d);
-        }
-      }
-    }
-    uniqueDates.sort((a, b) => a.getTime() - b.getTime());
-    return uniqueDates[0] ?? null;
-  }
+  this.debug(`MATCH FOUND for ${instrumentType}:`, match);
+  return match;
+}
 
-  private getCurrentMonthExpiry(rows: InstrumentRow[], now: Date): Date | null {
-    const uniqueDates: Date[] = [];
-    for (const r of rows) {
-      const d = this.parseExpiry(r);
-      if (!d) continue;
-      if (d < now) continue;
-      if (
-        d.getFullYear() === now.getFullYear() &&
-        d.getMonth() === now.getMonth()
-      ) {
-        if (!uniqueDates.some(u => this.sameDate(u, d))) {
-          uniqueDates.push(d);
-        }
-      }
-    }
-    uniqueDates.sort((a, b) => a.getTime() - b.getTime());
-    return uniqueDates[0] ?? null;
-  }
-
-  private pickOption(
-    rows: InstrumentRow[],
-    instrumentType: 'CE' | 'PE',
-    lotSize: number,
-    strike: number,
-    expiry: Date
-  ): InstrumentRow {
-    const eps = 0.0001;
-    const match = rows.find(r => {
-      const rType = r['instrument_type'];
-      const rLot = Number(r['lot_size']);
-      const rStrike = Number(r['strike']);
-      const rExpiry = this.parseExpiry(r);
-      if (!rExpiry) return false;
-
-      return (
-        rType === instrumentType &&
-        rLot === lotSize &&
-        Math.abs(rStrike - strike) < eps &&
-        this.sameDate(rExpiry, expiry)
-      );
-    });
-
-    if (!match) {
-      throw new Error(
-        `No ${instrumentType} found for strike=${strike}, lot=${lotSize}, expiry=${expiry.toDateString()}`
-      );
-    }
-
-    return match;
-  }
 
   private buildTvSymbol(
     prefix: string,
@@ -582,24 +692,32 @@ ngOnInit(): void {
 
   // ========= load instruments =========
 
-  private loadInstruments(): void {
-    this.loading = true;
-    this.error = null;
+private loadInstruments(): void {
+  
+  this.loading = true;
+  this.error = null;
 
-    this.http
-      .get('assets/instruments.csv', { responseType: 'text' })
-      .subscribe({
-        next: (csvText: string) => {
-          this.instruments = this.parseCsv(csvText);
-          this.loading = false;
-        },
-        error: err => {
-          console.error(err);
-          this.error = 'Failed to load instruments.csv from assets.';
-          this.loading = false;
-        },
-      });
-  }
+  this.http
+    .get('http://localhost:4000/api/instruments', {
+      responseType: 'text',
+    })
+    .subscribe({
+      next: (csvText: string) => {
+        this.instruments = this.parseCsv(csvText);
+        this.loading = false;
+        this.debug('Loaded instruments count:', this.instruments.length);
+
+const sample = this.instruments.filter(r => r['name'] === 'NIFTY').slice(0, 5);
+this.debug('Sample NIFTY rows:', sample);
+      },
+      error: (err) => {
+        console.error(err);
+        this.error = 'Failed to load instruments from backend.';
+        this.loading = false;
+      },
+    });
+}
+
 
   private parseCsv(csvText: string): InstrumentRow[] {
     const lines = csvText.split('\n').filter(l => l.trim().length > 0);
