@@ -1,7 +1,9 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, NgZone  } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
+import { timer } from 'rxjs';
+import { switchMap } from 'rxjs/operators';
 
 interface InstrumentRow {
   [key: string]: string;
@@ -22,6 +24,11 @@ interface ResultSet {
   bankNiftyPE?: OptionSelection;
   sensexCE?: OptionSelection;
   sensexPE?: OptionSelection;
+}
+interface IndexLtp {
+  NIFTY50: number | null;
+  BANKNIFTY: number | null;
+  SENSEX: number | null;
 }
 
 @Component({
@@ -231,11 +238,44 @@ export class KiteOptionFinderComponent implements OnInit {
   instruments: InstrumentRow[] = [];
   results: ResultSet | null = null;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient,  private ngZone: NgZone) {}
 
-  ngOnInit(): void {
-    this.loadInstruments();
-  }
+ngOnInit(): void {
+  // 1) Load instruments from CSV once
+  this.loadInstruments();
+
+  timer(0, 3000)
+  .pipe(
+    switchMap(() =>
+      this.http.get<IndexLtp>('http://localhost:4000/api/index-ltp')
+    )
+  )
+  .subscribe({
+    next: (ltp) => {
+      this.ngZone.run(() => {
+        console.log('LTP from backend:', ltp);
+
+        if (ltp.NIFTY50 != null) {
+          this.niftySpot = ltp.NIFTY50;
+        }
+        if (ltp.BANKNIFTY != null) {
+          this.bankNiftySpot = ltp.BANKNIFTY;
+        }
+        if (ltp.SENSEX != null) {
+          this.sensexSpot = ltp.SENSEX;
+        }
+      });
+    },
+    error: (err) => {
+      this.ngZone.run(() => {
+        console.error('Error calling /api/index-ltp:', err);
+      });
+    },
+  });
+
+
+}
+
 
   onCalculate(): void {
     this.error = null;
