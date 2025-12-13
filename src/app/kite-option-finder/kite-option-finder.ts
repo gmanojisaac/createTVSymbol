@@ -323,7 +323,7 @@ private logInstrArraySnippet(): void {
     if (!r) return;
     const symbol = this.symbolFromOption(r);
     lines.push(
-      `{symbol:"${symbol}",exchange:"${exchange}",tradingsymbol:"${r.tradingSymbol}",token:${r.instrumentToken},lot:${lot}}`
+      `{tradingview:"${symbol}",exchange:"${exchange}",zerodha:"${r.tradingSymbol}",token:${r.instrumentToken},lot:${lot}}`
     );
   };
 
@@ -380,7 +380,7 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
       throw new Error('Could not find current week expiry for NIFTY.');
     }
 
-    const niftyCEStrike = this.roundUpToNext50(this.niftySpot);
+    const niftyCEStrike = this.roundUpToNext50(this.niftySpot) + 50;
     const niftyPEStrike = niftyCEStrike + 50;
 
     this.debug('Selected NIFTY CE strike:', niftyCEStrike);
@@ -432,7 +432,7 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
       throw new Error('Could not find current month expiry for BANKNIFTY.');
     }
 
-    const bankCEStrike = this.roundUpToNext100(this.bankNiftySpot);
+    const bankCEStrike = this.roundUpToNext100(this.bankNiftySpot) + 100;
     const bankPEStrike = bankCEStrike + 100;
 
     this.debug('Selected BANKNIFTY CE strike:', bankCEStrike);
@@ -496,7 +496,7 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
       throw new Error('Could not find current week expiry for SENSEX.');
     }
 
-    const sensexCEStrike = this.sensexSpot - (this.sensexSpot % 100);
+    const sensexCEStrike = (this.sensexSpot - (this.sensexSpot % 100) + 100);
     const sensexPEStrike = sensexCEStrike + 100;
 
     this.debug('Selected SENSEX CE strike:', sensexCEStrike);
