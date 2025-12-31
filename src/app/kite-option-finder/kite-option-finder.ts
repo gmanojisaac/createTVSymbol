@@ -15,6 +15,7 @@ interface OptionSelection {
   instrumentToken: number;
   expiry: Date;
   tvSymbol: string;
+  lotSize: number;
 }
 
 interface ResultSet {
@@ -231,7 +232,18 @@ interface IndexLtp {
 })
 export class KiteOptionFinderComponent implements OnInit {
   private debug(...args: any[]) {
-    console.log('[DEBUG]', ...args);
+    // Deep clone objects for clearer browser console output.
+    const expanded = args.map(a => {
+      if (a && typeof a === 'object') {
+        try {
+          return JSON.parse(JSON.stringify(a));
+        } catch {
+          return a;
+        }
+      }
+      return a;
+    });
+    console.log('[DEBUG]', ...expanded);
   }
 
   niftySpot = 0;
@@ -317,29 +329,28 @@ private logInstrArraySnippet(): void {
 
   const pushInstr = (
     r: OptionSelection | undefined,
-    exchange: "NFO" | "BFO",
-    lot: number
+    exchange: "NFO" | "BFO"
   ) => {
     if (!r) return;
     const symbol = this.symbolFromOption(r);
     lines.push(
-      `{tradingview:"${symbol}",exchange:"${exchange}",zerodha:"${r.tradingSymbol}",token:${r.instrumentToken},lot:${lot}}`
+      `{tradingview:"${symbol}",exchange:"${exchange}",zerodha:"${r.tradingSymbol}",token:${r.instrumentToken},lot:${r.lotSize}}`
     );
   };
 
   const r = this.results;
 
   // NIFTY (NFO, lot 75)
-  pushInstr(r.niftyCE, "NFO", 75);
-  pushInstr(r.niftyPE, "NFO", 75);
+  pushInstr(r.niftyCE, "NFO");
+  pushInstr(r.niftyPE, "NFO");
 
   // BANKNIFTY (NFO, lot 35)
-  pushInstr(r.bankNiftyCE, "NFO", 35);
-  pushInstr(r.bankNiftyPE, "NFO", 35);
+  pushInstr(r.bankNiftyCE, "NFO");
+  pushInstr(r.bankNiftyPE, "NFO");
 
   // SENSEX (BFO, lot 20)
-  pushInstr(r.sensexCE, "BFO", 20);
-  pushInstr(r.sensexPE, "BFO", 20);
+  pushInstr(r.sensexCE, "BFO");
+  pushInstr(r.sensexPE, "BFO");
 
   const snippet =
 `export type Instr={symbol:string;
@@ -389,14 +400,14 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
     const niftyCE = this.pickOption(
       niftyInstruments,
       'CE',
-      75,
+      null,
       niftyCEStrike,
       niftyWeekExpiry
     );
     const niftyPE = this.pickOption(
       niftyInstruments,
       'PE',
-      75,
+      null,
       niftyPEStrike,
       niftyWeekExpiry
     );
@@ -407,6 +418,7 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
       instrumentToken: Number(niftyCE['instrument_token']),
       expiry: niftyWeekExpiry,
       tvSymbol: this.buildTvSymbol('NSE', 'NIFTY', niftyWeekExpiry, 'C', niftyCEStrike),
+      lotSize: Number(niftyCE['lot_size']),
     };
 
     const niftyPEResult: OptionSelection = {
@@ -415,6 +427,7 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
       instrumentToken: Number(niftyPE['instrument_token']),
       expiry: niftyWeekExpiry,
       tvSymbol: this.buildTvSymbol('NSE', 'NIFTY', niftyWeekExpiry, 'P', niftyPEStrike),
+      lotSize: Number(niftyPE['lot_size']),
     };
 
     // --- BANKNIFTY monthly ---
@@ -465,6 +478,7 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
         'C',
         bankCEStrike
       ),
+      lotSize: Number(bankCE['lot_size']),
     };
 
     const bankPEResult: OptionSelection = {
@@ -479,6 +493,7 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
         'P',
         bankPEStrike
       ),
+      lotSize: Number(bankPE['lot_size']),
     };
 
     // --- SENSEX weekly (BFO) ---
@@ -529,6 +544,7 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
         'C',
         sensexCEStrike
       ),
+      lotSize: Number(sensexCE['lot_size']),
     };
 
     const sensexPEResult: OptionSelection = {
@@ -543,6 +559,7 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
         'P',
         sensexPEStrike
       ),
+      lotSize: Number(sensexPE['lot_size']),
     };
 
     return {
@@ -646,6 +663,7 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
   private getCurrentMonthExpiry(rows: InstrumentRow[], now: Date): Date | null {
     const today = this.normalizeDate(now);
     const futureDates: Date[] = [];
+    const allFutureDates: Date[] = [];
 
     for (const r of rows) {
       const d = this.parseExpiry(r);
@@ -654,6 +672,10 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
       const dDay = this.normalizeDate(d);
 
       if (dDay < today) continue;
+
+      if (!allFutureDates.some(u => this.sameDate(u, dDay))) {
+        allFutureDates.push(dDay);
+      }
 
       if (
         dDay.getFullYear() === today.getFullYear() &&
@@ -666,13 +688,19 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
     }
 
     futureDates.sort((a, b) => a.getTime() - b.getTime());
-    return futureDates[0] ?? null;
+    if (futureDates.length) {
+      return futureDates[0];
+    }
+
+    allFutureDates.sort((a, b) => a.getTime() - b.getTime());
+    this.debug('No current month expiry found. Using next available:', allFutureDates[0]);
+    return allFutureDates[0] ?? null;
   }
 
   private pickOption(
     rows: InstrumentRow[],
     instrumentType: 'CE' | 'PE',
-    lotSize: number,
+    lotSize: number | null,
     strike: number,
     expiry: Date
   ): InstrumentRow {
@@ -681,6 +709,8 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
     );
 
     let match: InstrumentRow | null = null;
+    let fallback: InstrumentRow | null = null;
+    const foundLotSizes = new Set<number>();
 
     for (const r of rows) {
       const rType = r['instrument_type'];
@@ -692,16 +722,28 @@ console.log("[sixInstruments] loaded",INSTRUMENTS.length,"instruments");`;
 
       if (
         rType === instrumentType &&
-        rLot === lotSize &&
         rStrike === strike &&
         this.sameDate(rExpiry, expiry)
       ) {
-        match = r;
-        break;
+        foundLotSizes.add(rLot);
+        if (lotSize == null || rLot === lotSize) {
+          match = r;
+          break;
+        }
+        if (!fallback) {
+          fallback = r;
+        }
       }
     }
 
     if (!match) {
+      if (fallback) {
+        this.debug(
+          `No exact lot size match. Falling back to lot=${fallback['lot_size']} from options:`,
+          Array.from(foundLotSizes.values())
+        );
+        return fallback;
+      }
       this.debug(`NO MATCH FOUND for`, {
         instrumentType,
         lotSize,
